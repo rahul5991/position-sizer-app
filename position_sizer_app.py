@@ -38,7 +38,7 @@ try:
         st.stop()
 
     ltp = data["Close"].iloc[-1]
-    st.success(f"📈 Live Price for {symbol}: ₹{ltp:.2f}"
+    st.success(f"📈 Live Price for {symbol}: ₹{ltp:.2f}")
 
     # User inputs
     capital = st.number_input("💰 Capital (₹)", value=500000.0, step=10000.0)
