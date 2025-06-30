@@ -1,68 +1,50 @@
 import streamlit as st
-import pandas as pd
-import yfinance as yf
-import requests
-from io import StringIO
 
-st.set_page_config("📊 NSE Position Sizer", layout="centered")
-st.title("📊 NSE Position Sizer (Cash & Futures)")
+st.title("📊 Position Sizing Calculator (NSE/BSE)")
 
-@st.cache_data(ttl=3600)
-def fetch_lot_sizes():
-    url = "https://raw.githubusercontent.com/rohit-mp/lot-size-nse/main/fo_mktlots.csv"
-    response = requests.get(url)
-    if response.status_code == 200:
-        csv_raw = StringIO(response.text)
-        df = pd.read_csv(csv_raw)
-        df = df[["SYMBOL", "MARKET LOT"]]
-        return df.set_index("SYMBOL")["MARKET LOT"].to_dict()
-    else:
-        raise Exception("Could not fetch lot sizes from mirror CSV.")
+# Session state defaults
+default_values = {
+    'entry_price': 1704.0,
+    'capital': 700000.0,
+    'risk_percent': 0.5,
+    'stop_loss_percent': 4.5
+}
 
-try:
-    lot_sizes = fetch_lot_sizes()
-    symbols = sorted(lot_sizes.keys())
+for key, default in default_values.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
 
-    mode = st.selectbox("Mode", ["Cash", "Futures"])
-    symbol = st.selectbox("Select Symbol", symbols)
+# Inputs
+entry_price = st.number_input("Entry Price (₹)", min_value=1.0, step=1.0,
+                              value=st.session_state.entry_price, key='entry_price')
+capital = st.number_input("Total Capital (₹)", min_value=1.0, step=1000.0,
+                          value=st.session_state.capital, key='capital')
+risk_percent = st.number_input("Risk per Trade (%)", min_value=0.1, step=0.1,
+                               value=st.session_state.risk_percent, key='risk_percent')
+stop_loss_percent = st.number_input("Stop Loss (%)", min_value=0.1, step=0.1,
+                                    value=st.session_state.stop_loss_percent, key='stop_loss_percent')
 
-    suffix = ".NS" if mode == "Cash" else "-F.NS"
-    ticker = yf.Ticker(symbol + suffix)
-    data = ticker.history(period="1d")
+def calculate_position_size(entry_price, capital, risk_percent, stop_loss_percent):
+    risk_amount = (risk_percent / 100) * capital
+    stop_loss_per_share = (stop_loss_percent / 100) * entry_price
+    position_size = int(risk_amount / stop_loss_per_share)
+    total_position_value = position_size * entry_price
+    estimated_loss = position_size * stop_loss_per_share
+    stop_loss_level = entry_price - stop_loss_per_share
 
-    if data.empty:
-        st.error("❌ Could not fetch price.")
-        st.stop()
+    return position_size, total_position_value, stop_loss_per_share, estimated_loss, stop_loss_level
 
-    ltp = data["Close"].iloc[-1]
-    st.success(f"📈 Live Price for {symbol}: ₹{ltp:.2f}")
+# Run calc
+if st.button("Calculate Position Size"):
+    position_size, total_value, sl_per_share, est_loss, sl_level = calculate_position_size(
+        entry_price, capital, risk_percent, stop_loss_percent
+    )
 
-    capital = st.number_input("💰 Capital (₹)", value=500000.0, step=10000.0)
-    risk_pct = st.number_input("🎯 Risk per Trade (%)", value=1.0, step=0.1)
-    sl_pct = st.number_input("🔻 Stop Loss (%)", value=2.0, step=0.1)
+    st.success(f"🧾 Position Size: **{position_size} shares**")
+    st.write(f"💸 Total Trade Value: ₹{total_value:,.2f}")
+    st.write(f"🔻 Stop Loss per Share: ₹{sl_per_share:.2f}")
+    st.write(f"📉 **Stop Loss Price Level**: ₹{sl_level:.2f}")
+    st.write(f"⚠️ Estimated Max Loss: ₹{est_loss:.2f}")
 
-    lot_size = 1
-    if mode == "Futures":
-        lot_size = lot_sizes.get(symbol, 1)
-        st.info(f"📦 Lot size for {symbol}: {lot_size}")
-
-    risk_amt = capital * risk_pct / 100
-    sl_per_unit = ltp * sl_pct / 100
-
-    if mode == "Futures":
-        lots = int(risk_amt // (sl_per_unit * lot_size))
-        qty = lots * lot_size
-    else:
-        qty = int(risk_amt // sl_per_unit)
-
-    if qty <= 0:
-        st.error("⚠️ Risk too small for trade.")
-    else:
-        st.write(f"🧾 **Position Size**: {qty} {'units' if mode == 'Cash' else 'futures units'}")
-        st.write(f"🔻 Stop Loss Price: ₹{ltp - sl_per_unit:.2f}")
-        st.write(f"⚠️ Estimated Max Loss: ₹{qty * sl_per_unit:.2f}")
-        if mode == "Futures":
-            st.write(f"📦 Lots: {lots}")
-
-except Exception as e:
-    st.error(f"❌ Error: {e}")
+st.markdown("---")
+st.caption("Settings are saved per session. Refreshing resets them.")
