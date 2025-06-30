@@ -2,7 +2,7 @@ import streamlit as st
 
 st.title("📊 Position Sizing Calculator (NSE/BSE)")
 
-# Initialize session state
+# Session state defaults
 default_values = {
     'entry_price': 1704.0,
     'capital': 700000.0,
@@ -14,7 +14,7 @@ for key, default in default_values.items():
     if key not in st.session_state:
         st.session_state[key] = default
 
-# Input fields with session state
+# Inputs
 entry_price = st.number_input("Entry Price (₹)", min_value=1.0, step=1.0,
                               value=st.session_state.entry_price, key='entry_price')
 capital = st.number_input("Total Capital (₹)", min_value=1.0, step=1000.0,
@@ -30,19 +30,21 @@ def calculate_position_size(entry_price, capital, risk_percent, stop_loss_percen
     position_size = int(risk_amount / stop_loss_per_share)
     total_position_value = position_size * entry_price
     estimated_loss = position_size * stop_loss_per_share
+    stop_loss_level = entry_price - stop_loss_per_share
 
-    return position_size, total_position_value, stop_loss_per_share, estimated_loss
+    return position_size, total_position_value, stop_loss_per_share, estimated_loss, stop_loss_level
 
+# Run calc
 if st.button("Calculate Position Size"):
-    position_size, total_value, sl_per_share, est_loss = calculate_position_size(
+    position_size, total_value, sl_per_share, est_loss, sl_level = calculate_position_size(
         entry_price, capital, risk_percent, stop_loss_percent
     )
 
     st.success(f"🧾 Position Size: **{position_size} shares**")
     st.write(f"💸 Total Trade Value: ₹{total_value:,.2f}")
     st.write(f"🔻 Stop Loss per Share: ₹{sl_per_share:.2f}")
+    st.write(f"📉 **Stop Loss Price Level**: ₹{sl_level:.2f}")
     st.write(f"⚠️ Estimated Max Loss: ₹{est_loss:.2f}")
 
 st.markdown("---")
-st.caption("Settings are saved for this session. Refreshing the tab will reset them.")
-
+st.caption("Settings are saved per session. Refreshing resets them.")
