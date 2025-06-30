@@ -46,5 +46,14 @@ if st.button("Calculate Position Size"):
     st.write(f"📉 **Stop Loss Price Level**: ₹{sl_level:.2f}")
     st.write(f"⚠️ Estimated Max Loss: ₹{est_loss:.2f}")
 
-st.markdown("---")
 st.caption("Settings are saved per session. Refreshing resets them.")
+
+st.markdown("""
+---
+<center>
+<a href="https://coff.ee/rahulkatiyar" target="_blank">
+    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="45" width="162">
+</a>
+</center>
+""", unsafe_allow_html=True)
+
