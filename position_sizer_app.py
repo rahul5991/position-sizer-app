@@ -1,119 +1,88 @@
 import streamlit as st
-from nsetools import Nse
-from growwapi import GrowwAPI
+import pandas as pd
+from kiteconnect import KiteConnect
 
-# --- Initialize ---
-st.title("📊 Position Sizing Calculator + Margin (Cash / Futures)")
+# --- Config ---
+st.set_page_config(page_title="Futures Position Sizer + Margin", layout="centered")
+st.title("📈 Futures Position Sizer + Margin Estimator (Zerodha Kite)")
 
-# Load NSE F&O lot sizes once
-nse = Nse()
-fno_lots = nse.get_fno_lot_sizes()
+# --- Kite Credentials ---
+api_key = st.secrets["KITE_API_KEY"]
+api_secret = st.secrets["KITE_API_SECRET"]
+kite = KiteConnect(api_key=api_key)
+login_url = kite.login_url()
 
-# Initialize Groww API
-API_TOKEN = st.secrets.get("GROWW_API_TOKEN", "")
-groww = GrowwAPI(API_TOKEN)
+# --- Request Token Input ---
+st.markdown(f"🔐 [Login to Kite Connect]({login_url})")
+request_token = st.text_input("Paste `request_token` from redirected URL after login:")
 
-# Default session values
-default_values = {
-    'entry_price': 1704.0,
-    'capital': 700000.0,
-    'risk_percent': 0.5,
-    'stop_loss_percent': 4.5,
-    'mode': 'Cash',
-    'symbol': '',
-    'lot_size': 1
-}
-for k, v in default_values.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+if request_token:
+    try:
+        session_data = kite.generate_session(request_token, api_secret=api_secret)
+        kite.set_access_token(session_data["access_token"])
+        st.success("✅ Logged in to Zerodha!")
 
-# Reset
-if st.button("🔄 Reset All"):
-    for k, v in default_values.items():
-        st.session_state[k] = v
-    st.experimental_rerun()
+        # --- Load NSE Futures Instruments ---
+        @st.cache_data
+        def load_fno():
+            df = pd.DataFrame(kite.instruments("NFO"))
+            return df[df["instrument_type"] == "FUT"]
 
-# --- User inputs ---
-mode = st.selectbox("Select Mode", ["Cash", "Futures"], key='mode')
-entry_price = st.number_input("Entry Price (₹)", value=st.session_state.entry_price, key='entry_price')
-capital = st.number_input("Total Capital (₹)", value=st.session_state.capital, key='capital')
-risk_percent = st.number_input("Risk per Trade (%)", value=st.session_state.risk_percent, key='risk_percent')
-stop_loss_percent = st.number_input("Stop Loss (%)", value=st.session_state.stop_loss_percent, key='stop_loss_percent')
+        fno_df = load_fno()
+        symbol_list = sorted(fno_df["name"].unique())
+        symbol = st.selectbox("🔎 Select F&O Symbol", symbol_list)
 
-symbol = ""
-lot_size = 1
-if mode == "Futures":
-    symbol = st.text_input("F&O Symbol (e.g. NIFTY, RELIANCE)", value=st.session_state.symbol, key='symbol').upper().strip()
-    valid = nse.is_valid_code(symbol) or nse.is_valid_index(symbol)
-    if valid:
-        auto = fno_lots.get(symbol)
-        if auto:
-            st.success(f"Detected lot size for **{symbol}**: {auto}")
-            lot_size = auto
+        expiry_df = fno_df[fno_df["name"] == symbol]
+        expiry = st.selectbox("📅 Select Expiry Date", sorted(expiry_df["expiry"].unique()))
+        contract = expiry_df[expiry_df["expiry"] == expiry].iloc[0]
+
+        tradingsymbol = contract["tradingsymbol"]
+        lot_size = contract["lot_size"]
+        last_price = contract["last_price"]
+
+        st.info(f"📦 Trading Symbol: `{tradingsymbol}` | Lot Size: **{lot_size}** | LTP: ₹{last_price}")
+
+        # --- Input Risk Parameters ---
+        capital = st.number_input("💰 Total Capital (₹)", min_value=10000.0, value=500000.0, step=10000.0)
+        risk_percent = st.number_input("🎯 Risk per Trade (%)", min_value=0.1, value=1.0, step=0.1)
+        stop_loss_percent = st.number_input("🔻 Stop Loss (%)", min_value=0.1, value=2.0, step=0.1)
+        entry_price = st.number_input("📈 Entry Price", value=last_price, step=1.0)
+
+        # --- Position Sizing ---
+        risk_amount = capital * risk_percent / 100
+        sl_per_unit = entry_price * stop_loss_percent / 100
+        units = int(risk_amount // (sl_per_unit * lot_size)) * lot_size
+
+        if units == 0:
+            st.error("⚠️ Capital too small or SL too tight for this trade.")
         else:
-            st.warning(f"No lot-size found for '{symbol}'. Please input manually.")
-            lot_size = st.number_input("Lot Size (manual)", min_value=1, value=st.session_state.lot_size, key='lot_size')
-    else:
-        st.error(f"Symbol '{symbol}' not recognized on NSE.")
-        lot_size = st.number_input("Lot Size (manual)", min_value=1, value=st.session_state.lot_size, key='lot_size')
+            st.success(f"✅ Position Size: **{units} units**")
+            st.write(f"⚠️ Max Risk: ₹{units * sl_per_unit:.2f}")
+            st.write(f"💼 Trade Value: ₹{units * entry_price:,.2f}")
+            st.write(f"🔻 Stop Loss Level: ₹{entry_price - sl_per_unit:.2f}")
 
-# --- Computation ---
-def calculate_position_size(entry, capital, risk_pct, sl_pct, mode, lot):
-    risk_amt = capital * risk_pct / 100
-    sl_per = entry * sl_pct / 100
-
-    if mode == "Futures":
-        pos = int(risk_amt // sl_per // lot) * lot
-    else:
-        pos = int(risk_amt // sl_per)
-
-    total_val = pos * entry
-    est_loss = pos * sl_per
-    sl_level = entry - sl_per
-    return pos, total_val, sl_per, est_loss, sl_level, risk_amt
-
-# --- On Calculate ---
-if st.button("Calculate Position Size & Margin"):
-    if mode == "Futures" and (not symbol or not (nse.is_valid_code(symbol) or nse.is_valid_index(symbol))):
-        st.error("⚠️ Please enter a valid F&O symbol to proceed.")
-    else:
-        pos, total_val, sl_per, est_loss, sl_level, risk_amt = calculate_position_size(
-            entry_price, capital, risk_percent, stop_loss_percent, mode, lot_size
-        )
-        st.success(f"🧾 Position Size: **{pos} units/shares**")
-        st.write(f"💸 Trade Value: ₹{total_val:,.2f}")
-        st.write(f"🔻 SL per unit: ₹{sl_per:.2f}")
-        st.write(f"📉 SL Price Level: ₹{sl_level:.2f}")
-        st.write(f"🎯 Risk Amount: ₹{risk_amt:.2f} ({risk_percent}%)")
-        st.write(f"⚠️ Estimated Max Loss: ₹{est_loss:,.2f}")
-
-        # 🔍 Margin via Groww
-        if mode == "Futures":
+            # --- Margin Estimate ---
             st.write("---")
+            st.write("🔍 Fetching Required Margin...")
+
             try:
-                order_req = { 
-                    "trading_symbol": symbol,
-                    "transaction_type": groww.TRANSACTION_TYPE_BUY,
-                    "quantity": pos,
-                    "price": entry_price,
-                    "order_type": groww.ORDER_TYPE_LIMIT,
-                    "product": groww.PRODUCT_MIS,
-                    "exchange": groww.EXCHANGE_NSE
-                }
-                margin_resp = groww.get_order_margin_details(segment=groww.SEGMENT_FNO, orders=[order_req])
-                st.write("💰 **Margin Breakdown:**")
-                st.write(f"- SPAN required: ₹{margin_resp['span_required']}")
-                st.write(f"- Exposure required: ₹{margin_resp['exposure_required']}")
-                st.write(f"- Brokerage & charges: ₹{margin_resp['brokerage_and_charges']}")
-                st.write(f"- Total Margin required: ₹{margin_resp['total_requirement']}")
-            except Exception as e:
-                st.error(f"Error fetching margin: {e}")
+                margin = kite.order_margins([{
+                    "exchange": "NFO",
+                    "tradingsymbol": tradingsymbol,
+                    "transaction_type": kite.TRANSACTION_TYPE_BUY,
+                    "quantity": units,
+                    "product": kite.PRODUCT_MIS,
+                    "order_type": kite.ORDER_TYPE_MARKET
+                }])[0]
 
-        else:
-            # Cash: show available margin
-            avail = groww.get_available_margin_details()
-            st.write("---")
-            st.write("💼 **Account Margin (Cash):**")
-            st.write(f"- Clear Cash: ₹{avail['clear_cash']}")
-            st.write(f"- Net Margin Used: ₹{avail['net_margin_used']}")
-            st.write(f"- F&O Margin Used: ₹{avail['fno_margin_details']['net_fno_margin_used']}")        
+                st.success(f"💰 Total Margin Required: ₹{margin['total']:,}")
+                st.write(f"- SPAN: ₹{margin['span']:,}")
+                st.write(f"- Exposure: ₹{margin['exposure']:,}")
+                st.write(f"- Charges: ₹{margin['charges']:,}")
+            except Exception as e:
+                st.error(f"❌ Margin fetch failed: {e}")
+
+    except Exception as e:
+        st.error(f"❌ Login failed: {e}")
+else:
+    st.info("🔑 First, log in via Kite and paste the `request_token` here.")
