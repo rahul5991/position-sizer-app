@@ -1,4 +1,44 @@
 import streamlit as st
+import yfinance as yf
+import requests
+import json
+import streamlit as st
+import os
+
+def send_telegram_alert(symbol, current_price, target_price, condition):
+    token = st.secrets["TELEGRAM_BOT_TOKEN"]
+    chat_id = st.secrets["TELEGRAM_CHAT_ID"]
+    message = f"📢 {symbol} is ₹{current_price:.2f} ({condition} ₹{target_price})"
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    requests.post(url, data={"chat_id": chat_id, "text": message})
+
+def check_alerts():
+    with open("alerts.json", "r") as f:
+        alerts = json.load(f)
+
+    for alert in alerts:
+        symbol = alert["symbol"]
+        target = float(alert["target_price"])
+        cond = alert["condition"]
+
+        try:
+            ticker = yf.Ticker(symbol)
+            price = ticker.history(period="1d")["Close"].iloc[-1]
+
+            if (cond == "above" and price >= target) or (cond == "below" and price <= target):
+                send_telegram_alert(symbol, price, target, cond)
+                st.success(f"✅ Alert sent for {symbol}")
+            else:
+                st.info(f"ℹ️ {symbol} is ₹{price:.2f} — no alert triggered")
+
+        except Exception as e:
+            st.error(f"❌ Error for {symbol}: {e}")
+
+# Add this to your Streamlit app
+st.markdown("### 📬 Check & Send Telegram Alerts")
+if st.button("Run Alert Check Now"):
+    check_alerts()
+
 
 st.title("📊 Position Sizing Calculator (NSE/BSE)")
 
