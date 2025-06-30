@@ -1,0 +1,17 @@
+[
+  {
+    "symbol": "RELIANCE.NS",
+    "target_price": 3000,
+    "condition": "above"
+  },
+  {
+    "symbol": "INFY.NS",
+    "target_price": 1300,
+    "condition": "below"
+  },
+  {
+    "symbol": "TCS.NS",
+    "target_price": 4000,
+    "condition": "above"
+  }
+]
