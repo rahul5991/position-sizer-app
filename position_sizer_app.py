@@ -44,10 +44,10 @@ st.title("📊 Position Sizing Calculator (NSE/BSE)")
 
 # Session state defaults
 default_values = {
-    'entry_price': 1704.0,
-    'capital': 700000.0,
+    'entry_price': 0.0,
+    'capital': 0.0,
     'risk_percent': 0.5,
-    'stop_loss_percent': 4.5
+    'stop_loss_percent': 0.0
 }
 
 for key, default in default_values.items():
